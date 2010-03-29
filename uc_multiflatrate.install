@@ -1,0 +1,91 @@
+<?php
+
+/**
+ * @file
+ * Install hooks for uc_multiflatrate.module.
+ */
+
+/**
+ * Implementation of hook_schema().
+ */
+function uc_multiflatrate_schema() {
+  $schema = array();
+	
+	$schema['uc_multiflatrate_product_class'] = array(
+    'fields'=>array(
+      'mid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'pcid' => array(
+	    	'type' => 'varchar',
+      	'length' => '32',
+      	'not null' => TRUE,
+      	'default' => '',
+      ),
+      'base_price' => array(
+      'type' => 'numeric',
+      'precision' => 16,
+      'scale' => 5,
+      'not null' => FALSE,
+      'default' => 0.0,
+    ),
+    'base_unit' => array(
+      'type' => 'int',
+      'unsigned' => TRUE,
+      'not null' => TRUE,
+    	'default' => 1,
+  	),
+		'additional_unit_price' => array(
+      'type' => 'numeric',
+      'precision' => 16,
+      'scale' => 5,
+      'not null' => FALSE,
+      'default' => 0.0,
+  		),
+    ),
+    'primary key' => array('mid', 'pcid'),
+	);
+
+
+  $schema['uc_multiflatrate_methods'] = array(
+    'fields' => array(
+      'mid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'title' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'label' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      )
+    ),
+    'primary key' => array('mid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implementation of hook_install().
+ */
+function uc_multiflatrate_install() {
+  drupal_install_schema('uc_multiflatrate');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function uc_multiflatrate_uninstall() {
+  drupal_uninstall_schema('uc_multiflatrate');
+}
+

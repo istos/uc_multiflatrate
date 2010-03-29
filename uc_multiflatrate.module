@@ -1,0 +1,204 @@
+<?php
+// $Id: uc_flatrate.module,v 1.5.2.12 2009/08/17 21:27:57 islandusurper Exp $
+
+/**
+ * @file
+ * Shipping quote module that defines a flat shipping rate for each product.
+ */
+
+/******************************************************************************
+ * Drupal Hooks                                                               *
+ ******************************************************************************/
+
+/**
+ * Implementation of hook_menu().
+ */
+function uc_multiflatrate_menu() {
+  $items = array();
+
+  $items['admin/store/settings/quotes/methods/multiflatrate'] = array(
+    'title' => 'Multiflat rate',
+    'page callback' => 'uc_multiflatrate_admin_methods',
+    'access arguments' => array('configure quotes'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'uc_multiflatrate.admin.inc',
+  );
+  $items['admin/store/settings/quotes/methods/multiflatrate/%'] = array(
+    'title' => 'Edit multiflat rate method',
+    'page callback' => 'uc_multiflatrate_admin_method_manager',
+    'page arguments' => array(6),
+    'access arguments' => array('configure quotes'),
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_multiflatrate.admin.inc',
+  );
+  $items['admin/store/settings/quotes/multiflatrate/%/delete'] = array(
+    'title' => 'Delete multiflat rate method',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('uc_multiflatrate_admin_method_confirm_delete', 5),
+    'access arguments' => array('configure quotes'),
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_multiflatrate.admin.inc',
+  );
+  $items['admin/store/multiflatrate/product_class/%/delete/%'] = array(
+    'title' => 'Delete multiflat product class rate',
+    'page callback' => 'uc_multiflatrate_admin_method_product_class_delete',
+    'page arguments' => array(4, 6),
+    'access arguments' => array('configure quotes'),
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_multiflatrate.admin.inc',
+  );
+  $items['admin/store/multiflatrate/product_class/%/edit/%'] = array(
+    'title' => 'Edit multiflat product class rate',
+    'page callback' => 'uc_multiflatrate_admin_method_product_class_edit',
+    'page arguments' => array(4, 6),
+    'access arguments' => array('configure quotes'),
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_multiflatrate.admin.inc',
+  );
+
+  return $items;
+}
+
+
+
+
+/******************************************************************************
+ * Ubercart Hooks                                                             *
+ ******************************************************************************/
+
+/**
+ * Implementation of hook_ca_predicate().
+ *
+ * Connect the quote action with the quote event.
+ */
+
+function uc_multiflatrate_ca_predicate() {
+  $enabled = variable_get('uc_quote_enabled', array());
+  $predicates = array();
+
+  $result = db_query("SELECT mid, title FROM {uc_multiflatrate_methods}");
+  while ($method = db_fetch_object($result)) {
+    $predicates['uc_multiflatrate_get_quote_'. $method->mid] = array(
+      '#title' => t('Shipping quote via @method', array('@method' => $method->title)),
+      '#trigger' => 'get_quote_from_multiflatrate_'. $method->mid,
+      '#class' => 'uc_multiflatrate',
+      '#status' => $enabled['multiflatrate_'. $method->mid],
+      '#actions' => array(
+        array(
+          '#name' => 'uc_quote_action_get_quote',
+          '#title' => t('Fetch a multiflatrate shipping quote.'),
+          '#argument_map' => array(
+            'order' => 'order',
+            'method' => 'method',
+          ),
+        ),
+      ),
+    );
+  }
+
+  return $predicates;
+}
+
+/**
+ * Implementation of Ubercart's hook_shipping_method().
+ */
+ 
+function uc_multiflatrate_shipping_method() {
+  $methods = array();
+
+  $enabled = variable_get('uc_quote_enabled', array());
+  $weight = variable_get('uc_quote_method_weight', array());
+  $result = db_query("SELECT mid, title, label FROM {uc_multiflatrate_methods}");
+  while ($method = db_fetch_object($result)) {
+    $methods['multiflatrate_'. $method->mid] = array(
+      'id' => 'multiflatrate_'. $method->mid,
+      'module' => 'uc_multiflatrate',
+      'title' => $method->title,
+      'enabled' => $enabled['multiflatrate_'. $method->mid],
+      'quote' => array(
+        'type' => 'order',
+        'callback' => 'uc_multiflatrate_quote',
+        'accessorials' => array(
+          $method->label,
+        ),
+      ),
+      'weight' => $weight['multiflatrate_'. $method->mid],
+    );
+  }
+
+  return $methods;
+}
+
+/******************************************************************************
+ * Module Functions                                                           *
+ ******************************************************************************/
+
+/**
+ * Standard callback to return a shipping rate via the multiflat rate method.
+ *
+ * @param $products
+ *   The order's products.
+ * @param $details
+ *   Other order details including a shipping address.
+ * @param $method
+ *   The shipping method to create the quote.
+ * @return
+ *   An array containing the shipping quote for the order.
+ */
+ 
+function uc_multiflatrate_quote($products, $details, $method) {
+  $method = explode('_', $method['id']);
+  $mid = $method[1];
+  $context = array(
+    'revision' => 'altered',
+    'type' => 'amount',
+  );
+
+  if ($method = db_fetch_object(db_query("SELECT * FROM {uc_multiflatrate_methods} WHERE mid = %d", $mid))) {
+
+    $total_shipping_cost = 0;
+    
+    //Get the rules for each product type and place in a keyed array
+    $result = db_query("SELECT * FROM {uc_multiflatrate_product_class} WHERE mid = %d", $mid);
+    $product_class_rules = array();
+    while ($product_class_rule = db_fetch_object($result)){
+      $product_class_rules[$product_class_rule->pcid] = $product_class_rule;
+    }
+
+    $product_type_basket = array();
+    //Cycle through products and count them up according to type placing them in an array [type]=>count
+    foreach ($products as $product){
+      //if a product type we have encountered already update the counter
+      if (array_key_exists($product->type, $product_type_basket)){
+        $product_type_basket[$product->type]+= (int)$product->qty;
+      }else{
+        //add the product type to the basket
+        $product_type_basket[$product->type] = (int)$product->qty;
+      } 
+    }
+
+    //Cycle through the product basket and apply rules
+    foreach ($product_type_basket as $type=>$product_count) {
+      //but only apply rules for products that have rules defined for them
+      if (array_key_exists($type, $product_class_rules)){
+        //Cost is base price            
+        $cost = $product_class_rules[$type]->base_price;
+      
+        //plus a multiple for every number of units
+        $units = ceil($product_count / $product_class_rules[$type]->base_unit);
+        if ($units > 1){
+          $cost += (($units - 1)* $product_class_rules[$type]->additional_unit_price);
+        }
+
+        $total_shipping_cost += $cost;
+      }
+    }
+
+    $altered = uc_price($total_shipping_cost, $context);
+    $context['revision'] = 'formatted';
+    $formatted = uc_price($total_shipping_cost, $context);
+    $quotes[] = array('rate' => $altered, 'format' => $formatted, 'option_label' => check_plain($method->label));
+  }
+
+  return $quotes;
+}
